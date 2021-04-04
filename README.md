@@ -1,3 +1,12 @@
-# CagaCaga API
+# Jean Shortener API
 
-API for CagaCaga for manage all actions and security about https://cagaca.ga/
+The API for Jean Shortener and implements services
+
+# TODO
+
+- Account Management Endpoints
+
+# Contact
+
+* **Email**: contact@jean.host
+* **Discord**: iJean#9194
