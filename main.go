@@ -286,6 +286,16 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 			})
 		}
 
+		var usernameRegexp = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+		if !usernameRegexp.MatchString(body["username"].(string)) {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "not valid username",
+				"data":        nil,
+				"exited_code": 0,
+			})
+		}
+
 		var emailRegexp = regexp.MustCompile(`^(([^<>()[\]\.,;:\s@\"]+(\.[^<>()[\]\.,;:\s@\"]+)*)|(\".+\"))@(([^<>()[\]\.,;:\s@\"]+\.)+[^<>()[\]\.,;:\s@\"]{2,})$`)
 		if !emailRegexp.MatchString(body["email"].(string)) {
 			return c.JSON(fiber.Map{
@@ -516,7 +526,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		if body["url"] == nil || body["is_vanity"] == nil || body["vanity_url"] == nil {
 			return c.JSON(fiber.Map{
 				"status":      500,
-				"message":     "you need to include all data to create a new shortened url",
+				"message":     "you need to provide enough data to be able to create a new shortened URL",
 				"data":        nil,
 				"exited_code": 1,
 			})
@@ -562,7 +572,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 			if strings.Compare(body["user_token"].(string), user["token"].(string)) != 0 {
 				return c.JSON(fiber.Map{
 					"status":      500,
-					"message":     "invalid token",
+					"message":     "the session you are currently active in has a problem, please delete your localStorage (https://developer.chrome.com/docs/devtools/storage/localstorage/#delete)",
 					"data":        nil,
 					"exited_code": 1,
 				})
