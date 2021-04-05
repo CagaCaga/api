@@ -49,7 +49,7 @@ type GetMe struct {
 }
 
 func main() {
-	API(MyMongo("mongodb+srv://myapi:pri@jean.zjitk.mongodb.net/CagaCaga?retryWrites=true&w=majority"))
+	API(MyMongo("mongo uri"))
 }
 
 /// Return Mongo Client Connection
