@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -14,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"net/url"
 )
 
 // Register the author of some actions and logs
@@ -49,7 +51,7 @@ type GetMe struct {
 }
 
 func main() {
-	API(MyMongo("mongo uri"))
+	API(MyMongo("mongodb+srv://myapi:pri@jean.zjitk.mongodb.net/CagaCaga?retryWrites=true&w=majority"))
 }
 
 /// Return Mongo Client Connection
@@ -77,6 +79,28 @@ func API(client *mongo.Client) {
 	server := fiber.New()
 	server.Use(cors.New())
 
+	server.Use("/api/v1", func(c *fiber.Ctx) error {
+		c.Accepts("application/json")
+		return c.Next()
+	})
+
+	server.Use(limiter.New(limiter.Config{
+		Max: 			5,
+		Duration: 		10000,
+		Key:          	func(c *fiber.Ctx) string {
+			return c.Get("x-forwarded-for")
+		},
+		LimitReached: 	func(c *fiber.Ctx) error {
+			return c.JSON(fiber.Map{
+				"status":      429,
+				"message":     "rate limited",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		},
+	}))
+
+
 	//jeanservices.RegisterRoutes(server, client)
 	RegisterRoutes(server, client)
 
@@ -85,11 +109,6 @@ func API(client *mongo.Client) {
 
 // RegisterRoutes register all routes
 func RegisterRoutes(server *fiber.App, client *mongo.Client) {
-	server.Use("/api/v1", func(c *fiber.Ctx) error {
-		c.Accepts("application/json")
-		return c.Next()
-	})
-
 	server.Get("/api/v1", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"status":      200,
@@ -461,7 +480,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		})
 	})
 
-	server.Get("/api/v1/get/shortener/:id/data", func(c *fiber.Ctx) error {
+	server.Get("/api/v1/get/shortened/:id/data", func(c *fiber.Ctx) error {
 		if len(c.Params("id")) < 2 {
 			return c.JSON(fiber.Map{
 				"status":      200,
@@ -511,7 +530,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		})
 	})
 
-	server.Post("/api/v1/post/shortener/create", func(c *fiber.Ctx) error {
+	server.Post("/api/v1/post/shortened/create", func(c *fiber.Ctx) error {
 		body := make(map[string]interface{})
 		err := json.Unmarshal([]byte(string(c.Body())), &body)
 		if err != nil {
@@ -523,7 +542,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 			})
 		}
 
-		if body["url"] == nil || body["is_vanity"] == nil || body["vanity_url"] == nil {
+		if body["url"] == nil || body["is_vanity"] == nil {
 			return c.JSON(fiber.Map{
 				"status":      500,
 				"message":     "you need to provide enough data to be able to create a new shortened URL",
@@ -532,17 +551,53 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 			})
 		}
 
-		if reflect.TypeOf(body["user_id"]).String() != "string" ||
-			reflect.TypeOf(body["user_token"]).String() != "string" ||
-			reflect.TypeOf(body["url"]).String() != "string" ||
-			reflect.TypeOf(body["is_vanity"]).String() != "boolean" ||
-			reflect.TypeOf(body["vanity_url"]).String() != "string" {
+		if reflect.TypeOf(body["url"]).String() != "string" ||
+			reflect.TypeOf(body["is_vanity"]).String() != "bool" {
 			return c.JSON(fiber.Map{
 				"status":      200,
-				"message":     "the params need to be string",
+				"message":     "url need to be string and is_vanity need to be boolean",
 				"data":        nil,
 				"exited_code": 0,
 			})
+		}
+
+		if !isValidUrl(body["url"].(string)) {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "invalid url",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if body["vanity_url"] != nil {
+			vanityNameRegexp := regexp.MustCompile("^[a-zA-Z0-9_.-]*$")
+			if !vanityNameRegexp.MatchString(body["vanity_url"].(string)) {
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     "the vanity url only can be contain letters and numbers",
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
+
+			if len(body["vanity_url"].(string)) > 100 {
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     "the vanity url length can't be higher than 30 characters",
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
+
+			if len(body["vanity_url"].(string)) < 2 {
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     "the vanity url length can't be lower than 2 characters",
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
 		}
 
 		idKey, idValue := body["user_id"]
@@ -579,46 +634,13 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 			}
 		}
 
-		urlRegexp := regexp.MustCompile("[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b([-a-zA-Z0-9()@:%_\\+.~#?&//=]*)?")
-		if !urlRegexp.MatchString(body["url"].(string)) {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "invalid url",
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		vanityNameRegexp := regexp.MustCompile("^[a-zA-Z0-9_.-]*$")
-		if !vanityNameRegexp.MatchString(body["vanity_url"].(string)) {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the vanity url only can be contain letters and numbers",
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		if len(body["vanity_url"].(string)) > 100 {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the vanity url length can't be higher than 30 characters",
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		if len(body["vanity_url"].(string)) < 2 {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the vanity url length can't be lower than 2 characters",
-				"data":        nil,
-				"exited_code": 1,
-			})
+		var userID interface{}
+		if body["user_id"] != nil && user["id"] != nil {
+			userID = body["user_id"].(string)
 		}
 
 		var urlData = &URLShortened{}
-		if user["premium"] == true && body["is_vanity"] == true {
+		if user["premium"] == true && body["is_vanity"] != nil && body["is_vanity"] == true {
 			var checkVanityURLAvailability = make(map[string]interface{})
 			err = client.Database("CagaCaga").Collection("urls").FindOne(context.TODO(), bson.D{{"vanity_url", body["vanity_url"].(string)}}).Decode(&checkVanityURLAvailability)
 
@@ -633,7 +655,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 
 			urlData = &URLShortened{
 				Author: Author{
-					ID: user["id"].(string),
+					ID: userID,
 				},
 				Url:          body["url"].(string),
 				Code:         nil,
@@ -641,7 +663,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 				VanityURL:    body["vanity_url"].(string),
 				CreationDate: time.Now().String(),
 			}
-		} else if user["premium"] == false && body["is_vanity"] == true {
+		} else if user["premium"] == false && body["is_vanity"] != nil && body["is_vanity"] == true {
 			return c.JSON(fiber.Map{
 				"status":      500,
 				"message":     "vanity url's is only available for premium users",
@@ -661,11 +683,6 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 						"exited_code": 0,
 					})
 				}
-			}
-
-			var userID interface{}
-			if body["user_id"] != nil && user["id"] != nil {
-				userID = body["user_id"].(string)
 			}
 
 			urlData = &URLShortened{
@@ -711,4 +728,18 @@ func isUnknownDocument(err string) bool {
 	} else {
 		return false
 	}
+}
+
+func isValidUrl(toTest string) bool {
+	_, err := url.ParseRequestURI(toTest)
+	if err != nil {
+		return false
+	}
+
+	u, err := url.Parse(toTest)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false
+	}
+
+	return true
 }
