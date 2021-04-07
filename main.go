@@ -11,11 +11,11 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"net/url"
 	"reflect"
 	"regexp"
 	"strings"
 	"time"
-	"net/url"
 )
 
 // Register the author of some actions and logs
@@ -51,7 +51,7 @@ type GetMe struct {
 }
 
 func main() {
-	API(MyMongo("mongodb uri"))
+	API(MyMongo("mongodb+srv://myapi:pri@jean.zjitk.mongodb.net/CagaCaga?retryWrites=true&w=majority"))
 }
 
 /// Return Mongo Client Connection
@@ -85,12 +85,12 @@ func API(client *mongo.Client) {
 	})
 
 	server.Use(limiter.New(limiter.Config{
-		Max: 			5,
-		Duration: 		10000,
-		Key:          	func(c *fiber.Ctx) string {
+		Max:      5,
+		Duration: 10000,
+		Key: func(c *fiber.Ctx) string {
 			return c.Get("x-forwarded-for")
 		},
-		LimitReached: 	func(c *fiber.Ctx) error {
+		LimitReached: func(c *fiber.Ctx) error {
 			return c.JSON(fiber.Map{
 				"status":      429,
 				"message":     "rate limited",
@@ -99,7 +99,6 @@ func API(client *mongo.Client) {
 			})
 		},
 	}))
-
 
 	//jeanservices.RegisterRoutes(server, client)
 	RegisterRoutes(server, client)
@@ -124,9 +123,9 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		if err != nil {
 			if isUnknownDocument(err.Error()) {
 				return c.JSON(fiber.Map{
-					"status": 500,
-					"message": "doesn't exist none user with this id",
-					"data": nil,
+					"status":      500,
+					"message":     "doesn't exist none user with this id",
+					"data":        nil,
 					"exited_code": 0,
 				})
 			}
@@ -186,9 +185,9 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		if err != nil {
 			if isUnknownDocument(err.Error()) {
 				return c.JSON(fiber.Map{
-					"status": 500,
-					"message": "doesn't exist none user with this id",
-					"data": nil,
+					"status":      500,
+					"message":     "doesn't exist none user with this id",
+					"data":        nil,
 					"exited_code": 0,
 				})
 			}
@@ -677,9 +676,9 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 			if err != nil {
 				if !isUnknownDocument(err.Error()) {
 					return c.JSON(fiber.Map{
-						"status": 500,
-						"message": err.Error(),
-						"data": nil,
+						"status":      500,
+						"message":     err.Error(),
+						"data":        nil,
 						"exited_code": 0,
 					})
 				}
@@ -716,12 +715,14 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 	})
 }
 
+// Generate token for User Token and User ID
 func tokenGenerator(count int) string {
 	b := make([]byte, count)
 	rand.Read(b)
 	return fmt.Sprintf("%x", b)
 }
 
+// Check if an error returned by mongo client is about not found document
 func isUnknownDocument(err string) bool {
 	if strings.Compare(err, "mongo: no documents in result") == 0 {
 		return true
@@ -730,6 +731,7 @@ func isUnknownDocument(err string) bool {
 	}
 }
 
+// Check if string is URL
 func isValidUrl(toTest string) bool {
 	_, err := url.ParseRequestURI(toTest)
 	if err != nil {
