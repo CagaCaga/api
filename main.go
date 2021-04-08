@@ -51,7 +51,7 @@ type GetMe struct {
 }
 
 func main() {
-	API(MyMongo("mongodb uri"))
+	API(MyMongo("mongodb+srv://jeanshortener:LzB5U0xFXXkjn2Di@jean.zjitk.mongodb.net/JeanShortener?retryWrites=true&w=majority"))
 }
 
 /// Return Mongo Client Connection
@@ -119,7 +119,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 
 	server.Get("/api/v1/get/public/user/:id", func(c *fiber.Ctx) error {
 		data := make(map[string]interface{})
-		err := client.Database("CagaCaga").Collection("users").FindOne(context.TODO(), bson.D{{"id", c.Params("id")}}).Decode(&data)
+		err := client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"id", c.Params("id")}}).Decode(&data)
 		if err != nil {
 			if isUnknownDocument(err.Error()) {
 				return c.JSON(fiber.Map{
@@ -181,7 +181,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		}
 
 		var data = make(map[string]interface{})
-		err = client.Database("CagaCaga").Collection("users").FindOne(context.TODO(), bson.D{{"id", c.Params("id")}}).Decode(&data)
+		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"id", c.Params("id")}}).Decode(&data)
 		if err != nil {
 			if isUnknownDocument(err.Error()) {
 				return c.JSON(fiber.Map{
@@ -274,7 +274,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		}
 
 		userData := make(map[string]interface{})
-		err = client.Database("CagaCaga").Collection("users").FindOne(context.TODO(), bson.D{{"username", body["username"]}}).Decode(&userData)
+		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"username", body["username"]}}).Decode(&userData)
 		if err != nil {
 			if !isUnknownDocument(err.Error()) {
 				return c.JSON(fiber.Map{
@@ -324,7 +324,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 			})
 		}
 
-		err = client.Database("CagaCaga").Collection("users").FindOne(context.TODO(), bson.D{{"email", body["email"]}}).Decode(&userData)
+		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"email", body["email"]}}).Decode(&userData)
 		if err != nil {
 			if !isUnknownDocument(err.Error()) {
 				return c.JSON(fiber.Map{
@@ -375,7 +375,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 			CreatedAt: time.Now().String(),
 		}
 
-		_, err = client.Database("CagaCaga").Collection("users").InsertOne(context.TODO(), user)
+		_, err = client.Database("JeanShortener").Collection("users").InsertOne(context.TODO(), user)
 		if err != nil {
 			return c.JSON(fiber.Map{
 				"status":      500,
@@ -428,9 +428,9 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		}
 
 		user := make(map[string]interface{})
-		err = client.Database("CagaCaga").Collection("users").FindOne(context.TODO(), bson.D{{"username", body["username_email"]}}).Decode(&user)
+		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"username", body["username_email"]}}).Decode(&user)
 		if err != nil {
-			err = client.Database("CagaCaga").Collection("users").FindOne(context.TODO(), bson.D{{"email", body["username_email"]}}).Decode(&user)
+			err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"email", body["username_email"]}}).Decode(&user)
 			if err != nil {
 				if isUnknownDocument(err.Error()) {
 					return c.JSON(fiber.Map{
@@ -499,9 +499,9 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		}
 
 		shortenerData := make(map[string]interface{})
-		err := client.Database("CagaCaga").Collection("urls").FindOne(context.TODO(), bson.D{{"code", c.Params("id")}}).Decode(&shortenerData)
+		err := client.Database("JeanShortener").Collection("urls").FindOne(context.TODO(), bson.D{{"code", c.Params("id")}}).Decode(&shortenerData)
 		if shortenerData["_id"] == nil {
-			err = client.Database("CagaCaga").Collection("urls").FindOne(context.TODO(), bson.D{{"vanity_url", c.Params("id")}}).Decode(&shortenerData)
+			err = client.Database("JeanShortener").Collection("urls").FindOne(context.TODO(), bson.D{{"vanity_url", c.Params("id")}}).Decode(&shortenerData)
 			if err != nil {
 				if isUnknownDocument(err.Error()) {
 					return c.JSON(fiber.Map{
@@ -523,8 +523,8 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 
 		return c.JSON(fiber.Map{
 			"status":      200,
-			"message":     shortenerData,
-			"data":        nil,
+			"message":     nil,
+			"data":        shortenerData,
 			"exited_code": 0,
 		})
 	})
@@ -604,7 +604,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 
 		var user = make(map[string]interface{})
 		if (idKey != nil && idValue) && (tokenKey != nil && tokenValue) {
-			err = client.Database("CagaCaga").Collection("users").FindOne(context.TODO(), bson.D{{"id", body["user_id"]}}).Decode(&user)
+			err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"id", body["user_id"]}}).Decode(&user)
 			if err != nil {
 				if isUnknownDocument(err.Error()) {
 					return c.JSON(fiber.Map{
@@ -641,7 +641,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		var urlData = &URLShortened{}
 		if user["premium"] == true && body["is_vanity"] != nil && body["is_vanity"] == true {
 			var checkVanityURLAvailability = make(map[string]interface{})
-			err = client.Database("CagaCaga").Collection("urls").FindOne(context.TODO(), bson.D{{"vanity_url", body["vanity_url"].(string)}}).Decode(&checkVanityURLAvailability)
+			err = client.Database("JeanShortener").Collection("urls").FindOne(context.TODO(), bson.D{{"vanity_url", body["vanity_url"].(string)}}).Decode(&checkVanityURLAvailability)
 
 			if checkVanityURLAvailability["_id"] != nil {
 				return c.JSON(fiber.Map{
@@ -672,7 +672,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		} else {
 			urlCode := tokenGenerator(3)
 			checkURLCodeAvailability := make(map[string]interface{})
-			err = client.Database("CagaCaga").Collection("urls").FindOne(context.TODO(), bson.D{{"code", urlCode}}).Decode(&checkURLCodeAvailability)
+			err = client.Database("JeanShortener").Collection("urls").FindOne(context.TODO(), bson.D{{"code", urlCode}}).Decode(&checkURLCodeAvailability)
 			if err != nil {
 				if !isUnknownDocument(err.Error()) {
 					return c.JSON(fiber.Map{
@@ -696,7 +696,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 			}
 		}
 
-		_, err = client.Database("CagaCaga").Collection("urls").InsertOne(context.TODO(), urlData)
+		_, err = client.Database("JeanShortener").Collection("urls").InsertOne(context.TODO(), urlData)
 		if err != nil {
 			return c.JSON(fiber.Map{
 				"status":      500,
