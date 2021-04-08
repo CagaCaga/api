@@ -51,7 +51,7 @@ type GetMe struct {
 }
 
 func main() {
-	API(MyMongo("mongodb+srv://jeanshortener:LzB5U0xFXXkjn2Di@jean.zjitk.mongodb.net/JeanShortener?retryWrites=true&w=majority"))
+	API(MyMongo("mongodb"))
 }
 
 /// Return Mongo Client Connection
