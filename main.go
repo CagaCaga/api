@@ -5,17 +5,19 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"reflect"
+	"regexp"
+	"strings"
+	"time"
+	"os"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"net/url"
-	"reflect"
-	"regexp"
-	"strings"
-	"time"
+	"github.com/joho/godotenv"
 )
 
 // Register the author of some actions and logs
@@ -51,10 +53,10 @@ type GetMe struct {
 }
 
 func main() {
-	API(MyMongo("mongodb"))
+	API(MyMongo(getEnv("MONGO_URI")))
 }
 
-/// Return Mongo Client Connection
+/// Return MongoDB Connection
 func MyMongo(atlasURI string) *mongo.Client {
 	client, err := mongo.NewClient(options.Client().ApplyURI(atlasURI))
 	if err != nil {
@@ -85,11 +87,9 @@ func API(client *mongo.Client) {
 	})
 
 	server.Use(limiter.New(limiter.Config{
-		Max:      5,
-		Duration: 10000,
-		Key: func(c *fiber.Ctx) string {
-			return c.Get("x-forwarded-for")
-		},
+		Max:      15,
+		Duration: 5000,
+		Key: limiter.ConfigDefault.KeyGenerator,
 		LimitReached: func(c *fiber.Ctx) error {
 			return c.JSON(fiber.Map{
 				"status":      429,
@@ -100,13 +100,12 @@ func API(client *mongo.Client) {
 		},
 	}))
 
-	//jeanservices.RegisterRoutes(server, client)
 	RegisterRoutes(server, client)
 
 	server.Listen(":5000")
 }
 
-// RegisterRoutes register all routes
+// Register all routes
 func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 	server.Get("/api/v1", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
@@ -117,384 +116,19 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		})
 	})
 
-	server.Get("/api/v1/get/public/user/:id", func(c *fiber.Ctx) error {
-		data := make(map[string]interface{})
-		err := client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"id", c.Params("id")}}).Decode(&data)
-		if err != nil {
-			if isUnknownDocument(err.Error()) {
-				return c.JSON(fiber.Map{
-					"status":      500,
-					"message":     "doesn't exist none user with this id",
-					"data":        nil,
-					"exited_code": 0,
-				})
-			}
+	RegisterUserRoutes(server, client)
+	RegisterShortenerRoutes(server, client)
+}
 
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     err.Error(),
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		data["email"] = nil
-		data["password"] = nil
-		data["token"] = nil
-
-		return c.JSON(fiber.Map{
-			"status":      200,
-			"message":     "obtained",
-			"data":        data,
-			"exited_code": 0,
-		})
-	})
-
-	server.Post("/api/v1/post/public/user/:id", func(c *fiber.Ctx) error {
-		body := make(map[string]interface{})
-		err := json.Unmarshal([]byte(string(c.Body())), &body)
-		if err != nil {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     err.Error(),
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		if body["token"] == nil {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the raw body need to have: token",
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		if reflect.TypeOf(body["token"]).String() != "string" {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the token is the raw need to be string",
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		var data = make(map[string]interface{})
-		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"id", c.Params("id")}}).Decode(&data)
-		if err != nil {
-			if isUnknownDocument(err.Error()) {
-				return c.JSON(fiber.Map{
-					"status":      500,
-					"message":     "doesn't exist none user with this id",
-					"data":        nil,
-					"exited_code": 0,
-				})
-			}
-
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     err.Error(),
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		if data["token"] == nil {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "user document dont have token",
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		if strings.Compare(data["token"].(string), body["token"].(string)) != 0 {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "invalid token",
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		return c.JSON(fiber.Map{
-			"status":      200,
-			"message":     "the id and token match, and the data has been sent",
-			"data":        data,
-			"exited_code": 0,
-		})
-	})
-
-	server.Post("/api/v1/post/user/create", func(c *fiber.Ctx) error {
-		body := make(map[string]interface{})
-		err := json.Unmarshal([]byte(string(c.Body())), &body)
-		if err != nil {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     err.Error(),
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		if body["name"] == nil ||
-			body["username"] == nil ||
-			body["email"] == nil ||
-			body["password"] == nil ||
-			body["confirm_password"] == nil {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the raw body need to have: name, username, email, password and confirm_password",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		if reflect.TypeOf(body["name"]).String() != "string" ||
-			reflect.TypeOf(body["username"]).String() != "string" ||
-			reflect.TypeOf(body["email"]).String() != "string" ||
-			reflect.TypeOf(body["password"]).String() != "string" ||
-			reflect.TypeOf(body["confirm_password"]).String() != "string" {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the value of all keys in the raw body need to be string",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		if len(body["username"].(string)) >= 25 || len(body["username"].(string)) <= 3 {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the length of the username must be higher than 3 and less than 25",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		userData := make(map[string]interface{})
-		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"username", body["username"]}}).Decode(&userData)
-		if err != nil {
-			if !isUnknownDocument(err.Error()) {
-				return c.JSON(fiber.Map{
-					"status":      500,
-					"message":     err.Error(),
-					"data":        nil,
-					"exited_code": 0,
-				})
-			}
-		}
-
-		if userData["username"] != nil {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "already exist an user with that username",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		if len(body["name"].(string)) >= 100 || len(body["name"].(string)) <= 1 {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the length of the name must be higher than 1 and less than 100",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		var usernameRegexp = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
-		if !usernameRegexp.MatchString(body["username"].(string)) {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "not valid username",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		var emailRegexp = regexp.MustCompile(`^(([^<>()[\]\.,;:\s@\"]+(\.[^<>()[\]\.,;:\s@\"]+)*)|(\".+\"))@(([^<>()[\]\.,;:\s@\"]+\.)+[^<>()[\]\.,;:\s@\"]{2,})$`)
-		if !emailRegexp.MatchString(body["email"].(string)) {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "not valid email",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"email", body["email"]}}).Decode(&userData)
-		if err != nil {
-			if !isUnknownDocument(err.Error()) {
-				return c.JSON(fiber.Map{
-					"status":      500,
-					"message":     "existing user with that username",
-					"data":        nil,
-					"exited_code": 0,
-				})
-			}
-		}
-		if userData["username"] != nil {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "existing user with that email",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		if len(body["password"].(string)) <= 8 || len(body["password"].(string)) >= 1500 {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the length of the password must be higher than 8 and less than 1500",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		if strings.Compare(body["password"].(string), body["confirm_password"].(string)) != 0 {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the password doesn't match with confirm password",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		token := tokenGenerator(100)
-		id := tokenGenerator(20)
-		user := User{
-			Token:     token,
-			ID:        id,
-			Name:      body["name"].(string),
-			Username:  body["username"].(string),
-			Email:     body["email"].(string),
-			Password:  body["password"].(string),
-			Premium:   false,
-			CreatedAt: time.Now().String(),
-		}
-
-		_, err = client.Database("JeanShortener").Collection("users").InsertOne(context.TODO(), user)
-		if err != nil {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     err.Error(),
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		return c.JSON(fiber.Map{
-			"status":  200,
-			"message": "ok",
-			"data": fiber.Map{
-				"token": token,
-				"id":    id,
-			},
-			"exited_code": 0,
-		})
-	})
-
-	server.Post("/api/v1/post/user/request/credentials", func(c *fiber.Ctx) error {
-		body := make(map[string]interface{})
-		err := json.Unmarshal([]byte(string(c.Body())), &body)
-		if err != nil {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     err.Error(),
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		if body["username_email"] == nil ||
-			body["password"] == nil {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the raw body need to have: username_email and password",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		if reflect.TypeOf(body["username_email"]).String() != "string" || reflect.TypeOf(body["password"]).String() != "string" {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the value of all keys in the raw body need to be string",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		user := make(map[string]interface{})
-		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"username", body["username_email"]}}).Decode(&user)
-		if err != nil {
-			err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"email", body["username_email"]}}).Decode(&user)
-			if err != nil {
-				if isUnknownDocument(err.Error()) {
-					return c.JSON(fiber.Map{
-						"status":      500,
-						"message":     "doesn't exist none user with this username or email",
-						"data":        nil,
-						"exited_code": 0,
-					})
-				}
-
-				return c.JSON(fiber.Map{
-					"status":      500,
-					"message":     err.Error(),
-					"data":        nil,
-					"exited_code": 0,
-				})
-			}
-		}
-
-		if user["id"] == nil || user["token"] == nil || user["username"] == nil || user["email"] == nil || user["password"] == nil {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "your account have issues, please contact to support",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		if strings.Compare(user["password"].(string), string(body["password"].(string))) != 0 {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "the password not match",
-				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		return c.JSON(fiber.Map{
-			"status":  200,
-			"message": "ok",
-			"data": fiber.Map{
-				"id":    user["id"].(string),
-				"token": user["token"].(string),
-			},
-			"exited_code": 0,
-		})
-	})
-
-	server.Get("/api/v1/get/shortened/:id/data", func(c *fiber.Ctx) error {
-		if len(c.Params("id")) < 2 {
+// Register routes related to the shortener
+func RegisterShortenerRoutes(server *fiber.App, client *mongo.Client) {
+	server.Get("/api/v1/get/shortener/:id/data", func(c *fiber.Ctx) error {
+		if len(c.Params("id")) < 2 || len(c.Params("id")) > 100 {
 			return c.JSON(fiber.Map{
 				"status":      200,
-				"message":     "invalid url code, the code number of characters of all url shorts is higher than 2",
+				"message":     "invalid shortener code",
 				"data":        nil,
-				"exited_code": 0,
-			})
-		}
-
-		if len(c.Params("id")) > 100 {
-			return c.JSON(fiber.Map{
-				"status":      200,
-				"message":     "invalid url code, the code number of characters of all url shorts is lower than 100",
-				"data":        nil,
-				"exited_code": 0,
+				"exited_code": 1,
 			})
 		}
 
@@ -506,9 +140,9 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 				if isUnknownDocument(err.Error()) {
 					return c.JSON(fiber.Map{
 						"status":      500,
-						"message":     "doesn't exist none url linked with this code or vanity url",
+						"message":     "non-existent user",
 						"data":        nil,
-						"exited_code": 0,
+						"exited_code": 1,
 					})
 				}
 
@@ -516,20 +150,20 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 					"status":      200,
 					"message":     err.Error(),
 					"data":        nil,
-					"exited_code": 0,
+					"exited_code": 1,
 				})
 			}
 		}
 
 		return c.JSON(fiber.Map{
 			"status":      200,
-			"message":     nil,
+			"message":     "ok",
 			"data":        shortenerData,
 			"exited_code": 0,
 		})
 	})
 
-	server.Post("/api/v1/post/shortened/create", func(c *fiber.Ctx) error {
+	server.Post("/api/v1/post/shortener/create", func(c *fiber.Ctx) error {
 		body := make(map[string]interface{})
 		err := json.Unmarshal([]byte(string(c.Body())), &body)
 		if err != nil {
@@ -544,7 +178,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		if body["url"] == nil || body["is_vanity"] == nil {
 			return c.JSON(fiber.Map{
 				"status":      500,
-				"message":     "you need to provide enough data to be able to create a new shortened URL",
+				"message":     "invalid body",
 				"data":        nil,
 				"exited_code": 1,
 			})
@@ -553,17 +187,17 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		if reflect.TypeOf(body["url"]).String() != "string" ||
 			reflect.TypeOf(body["is_vanity"]).String() != "bool" {
 			return c.JSON(fiber.Map{
-				"status":      200,
-				"message":     "url need to be string and is_vanity need to be boolean",
+				"status":      500,
+				"message":     "invalid body",
 				"data":        nil,
-				"exited_code": 0,
+				"exited_code": 1,
 			})
 		}
 
 		if !isValidUrl(body["url"].(string)) {
 			return c.JSON(fiber.Map{
 				"status":      500,
-				"message":     "invalid url",
+				"message":     "invalid body",
 				"data":        nil,
 				"exited_code": 1,
 			})
@@ -609,9 +243,9 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 				if isUnknownDocument(err.Error()) {
 					return c.JSON(fiber.Map{
 						"status":      500,
-						"message":     "doesn't exist none user with this id",
+						"message":     "non-existent user",
 						"data":        nil,
-						"exited_code": 0,
+						"exited_code": 1,
 					})
 				}
 
@@ -639,9 +273,37 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		}
 
 		var urlData = &URLShortened{}
-		if user["premium"] == true && body["is_vanity"] != nil && body["is_vanity"] == true {
+		if user["premium"] == true && body["is_vanity"] != nil && userID != nil {
 			var checkVanityURLAvailability = make(map[string]interface{})
+
+			_, err := client.Database("JeanShortener").Collection("urls").Find(context.TODO(), bson.M{"author": bson.M{"id": userID}, "is_vanity": true})
+			if err != nil {
+				if isUnknownDocument(err.Error()) {
+					return c.JSON(fiber.Map{
+						"status":      500,
+						"message":     "non-existent user",
+						"data":        nil,
+						"exited_code": 1,
+					})	
+				}
+
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     err.Error(),
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
+
 			err = client.Database("JeanShortener").Collection("urls").FindOne(context.TODO(), bson.D{{"vanity_url", body["vanity_url"].(string)}}).Decode(&checkVanityURLAvailability)
+			if err != nil {
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     err.Error(),
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
 
 			if checkVanityURLAvailability["_id"] != nil {
 				return c.JSON(fiber.Map{
@@ -665,7 +327,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 		} else if user["premium"] == false && body["is_vanity"] != nil && body["is_vanity"] == true {
 			return c.JSON(fiber.Map{
 				"status":      500,
-				"message":     "vanity url's is only available for premium users",
+				"message":     "vanity url is only available for premium users",
 				"data":        nil,
 				"exited_code": 1,
 			})
@@ -679,7 +341,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 						"status":      500,
 						"message":     err.Error(),
 						"data":        nil,
-						"exited_code": 0,
+						"exited_code": 1,
 					})
 				}
 			}
@@ -702,7 +364,7 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 				"status":      500,
 				"message":     err.Error(),
 				"data":        nil,
-				"exited_code": 0,
+				"exited_code": 1,
 			})
 		}
 
@@ -710,6 +372,546 @@ func RegisterRoutes(server *fiber.App, client *mongo.Client) {
 			"status":      200,
 			"message":     "ok",
 			"data":        urlData,
+			"exited_code": 0,
+		})
+	})
+
+	server.Delete("/api/v1/post/shortener/:id/delete", func(c *fiber.Ctx) error {
+		body := make(map[string]interface{})
+		err := json.Unmarshal([]byte(string(c.Body())), &body)
+		if err != nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     err.Error(),
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if len(c.Params("id")) < 2 || len(c.Params("id")) > 100 {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "invalid shortener code",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+		if body["user_id"] == nil || reflect.TypeOf(body["user_id"]).String() != "string" {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "invalid body",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		user := make(map[string]interface{})
+		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"id", body["user_id"]}}).Decode(&user)
+		if err != nil {
+			if(isUnknownDocument(err.Error())) {
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     "non-existent user",
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
+
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     err.Error(),
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if user["id"] == nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "non-existent user",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if user["token"] != body["token"] {
+			return c.JSON(fiber.Map{
+				"status":      401,
+				"message":     "unauthorized",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		result, err := client.Database("JeanShortener").Collection("urls").DeleteOne(context.TODO(), bson.M{"author": bson.M{"id": body["user_id"]}, "code": c.Params("id")})
+
+		if result.DeletedCount != 1 {
+			result, err = client.Database("JeanShortener").Collection("urls").DeleteOne(context.TODO(), bson.M{"author": bson.M{"id": body["user_id"]}, "vanity_url": c.Params("id")})
+		}
+
+		if err != nil {
+			if isUnknownDocument(err.Error()) {
+				return c.JSON(fiber.Map{
+					"status":      200,
+					"message":     "not-existent url shorted",
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
+
+			if err != nil {
+				return c.JSON(fiber.Map{
+					"status":      200,
+					"message":     err.Error(),
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
+		}
+
+		return c.JSON(fiber.Map{
+			"status":      200,
+			"message":     "deleted",
+			"data":        result,
+			"exited_code": 0,
+		})
+	})
+}
+
+// Register routes related to users and authentication
+func RegisterUserRoutes(server *fiber.App, client *mongo.Client) {
+	server.Get("/api/v1/get/public/user/:id", func(c *fiber.Ctx) error {
+		data := make(map[string]interface{})
+		err := client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"id", c.Params("id")}}).Decode(&data)
+		if err != nil {
+			if isUnknownDocument(err.Error()) {
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     "non-existent user",
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
+
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     err.Error(),
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		data["email"] = nil
+		data["password"] = nil
+		data["token"] = nil
+
+		return c.JSON(fiber.Map{
+			"status":      200,
+			"message":     "authorized",
+			"data":        data,
+			"exited_code": 0,
+		})
+	})
+
+	server.Post("/api/v1/post/all/user/:id", func(c *fiber.Ctx) error {
+		body := make(map[string]interface{})
+		err := json.Unmarshal([]byte(string(c.Body())), &body)
+		if err != nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     err.Error(),
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if body["token"] == nil || reflect.TypeOf(body["token"]).String() != "string" {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "invalid body",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		var data = make(map[string]interface{})
+		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"id", c.Params("id")}}).Decode(&data)
+		if err != nil {
+			if isUnknownDocument(err.Error()) {
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     "non-existent user",
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
+
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     err.Error(),
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if data["token"] == nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "user data has issues",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if strings.Compare(data["token"].(string), body["token"].(string)) != 0 {
+			return c.JSON(fiber.Map{
+				"status":      401,
+				"message":     "unauthorized",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"status":      200,
+			"message":     "authorized",
+			"data":        data,
+			"exited_code": 0,
+		})
+	})
+
+	server.Post("/api/v1/post/user/data/dashboard/:id", func(c *fiber.Ctx) error {
+		body := make(map[string]interface{})
+		err := json.Unmarshal([]byte(string(c.Body())), &body)
+		if err != nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     err.Error(),
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if body["token"] == nil || reflect.TypeOf(body["token"]).String() != "string" {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "invalid body",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		var data = make(map[string]interface{})
+		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"id", c.Params("id")}}).Decode(&data)
+		if err != nil {
+			if isUnknownDocument(err.Error()) {
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     "non-existent user",
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
+
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     err.Error(),
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if data["token"] == nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "user data has issues",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if strings.Compare(data["token"].(string), body["token"].(string)) != 0 {
+			return c.JSON(fiber.Map{
+				"status":      401,
+				"message":     "unauthorized",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		var urls []interface{}
+		urlsFound, err := client.Database("JeanShortener").Collection("urls").Find(context.TODO(), bson.M{"author": bson.M{"id": c.Params("id")}})
+		if err != nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     err.Error(),
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		defer urlsFound.Close(context.TODO())
+
+		for urlsFound.Next(context.TODO()) {
+			var urlObject bson.M
+			if err = urlsFound.Decode(&urlObject); err != nil {
+				panic(err)
+			}
+
+			urls = append(urls, urlObject)
+		}
+
+		data["urls"] = urls
+
+		return c.JSON(fiber.Map{
+			"status":      200,
+			"message":     "authorized",
+			"data":        data,
+			"exited_code": 0,
+		})
+	})
+
+	server.Post("/api/v1/post/user/create", func(c *fiber.Ctx) error {
+		body := make(map[string]interface{})
+		err := json.Unmarshal([]byte(string(c.Body())), &body)
+		if err != nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     err.Error(),
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if body["name"] == nil ||
+			body["username"] == nil ||
+			body["email"] == nil ||
+			body["password"] == nil ||
+			body["confirm_password"] == nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "invalid body",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if reflect.TypeOf(body["name"]).String() != "string" ||
+			reflect.TypeOf(body["username"]).String() != "string" ||
+			reflect.TypeOf(body["email"]).String() != "string" ||
+			reflect.TypeOf(body["password"]).String() != "string" ||
+			reflect.TypeOf(body["confirm_password"]).String() != "string" {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "invalid body",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if len(body["username"].(string)) >= 25 || len(body["username"].(string)) <= 3 {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "the length of the username must be higher than 3 and less than 25",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		userData := make(map[string]interface{})
+		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"username", body["username"]}}).Decode(&userData)
+		if err != nil {
+			if !isUnknownDocument(err.Error()) {
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     err.Error(),
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
+		}
+
+		if userData["username"] != nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "already exist an user with that username",
+				"data":        nil,
+				"exited_code": 0,
+			})
+		}
+
+		if len(body["name"].(string)) >= 100 || len(body["name"].(string)) <= 1 {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "the length of the name must be higher than 1 and less than 100",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		var usernameRegexp = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+		if !usernameRegexp.MatchString(body["username"].(string)) {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "not valid username",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		var emailRegexp = regexp.MustCompile(`^(([^<>()[\]\.,;:\s@\"]+(\.[^<>()[\]\.,;:\s@\"]+)*)|(\".+\"))@(([^<>()[\]\.,;:\s@\"]+\.)+[^<>()[\]\.,;:\s@\"]{2,})$`)
+		if !emailRegexp.MatchString(body["email"].(string)) {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "not valid email",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"email", body["email"]}}).Decode(&userData)
+		if err != nil {
+			if !isUnknownDocument(err.Error()) {
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     "existing user with that username",
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
+		}
+		if userData["username"] != nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "existing user with that email",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if len(body["password"].(string)) <= 8 || len(body["password"].(string)) >= 1500 {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "the length of the password must be higher than 8 and less than 1500",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if strings.Compare(body["password"].(string), body["confirm_password"].(string)) != 0 {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "the password doesn't match with confirm password",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		token := tokenGenerator(100)
+		id := tokenGenerator(20)
+		user := User{
+			Token:     token,
+			ID:        id,
+			Name:      body["name"].(string),
+			Username:  body["username"].(string),
+			Email:     body["email"].(string),
+			Password:  body["password"].(string),
+			Premium:   false,
+			CreatedAt: time.Now().String(),
+		}
+
+		_, err = client.Database("JeanShortener").Collection("users").InsertOne(context.TODO(), user)
+		if err != nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     err.Error(),
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"status":  200,
+			"message": "created",
+			"data": fiber.Map{
+				"token": token,
+				"id":    id,
+			},
+			"exited_code": 0,
+		})
+	})
+
+	server.Post("/api/v1/post/user/request/credentials", func(c *fiber.Ctx) error {
+		body := make(map[string]interface{})
+		err := json.Unmarshal([]byte(string(c.Body())), &body)
+		if err != nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     err.Error(),
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if body["username_email"] == nil ||
+			body["password"] == nil ||
+			reflect.TypeOf(body["username_email"]).String() != "string" || reflect.TypeOf(body["password"]).String() != "string" {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "invalid body",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		user := make(map[string]interface{})
+		err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"username", body["username_email"]}}).Decode(&user)
+		if err != nil {
+			err = client.Database("JeanShortener").Collection("users").FindOne(context.TODO(), bson.D{{"email", body["username_email"]}}).Decode(&user)
+			if err != nil {
+				if isUnknownDocument(err.Error()) {
+					return c.JSON(fiber.Map{
+						"status":      500,
+						"message":     "doesn't exist none user with this username or email",
+						"data":        nil,
+						"exited_code": 1,
+					})
+				}
+
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     err.Error(),
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
+		}
+
+		if user["id"] == nil || user["token"] == nil || user["username"] == nil || user["email"] == nil || user["password"] == nil {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "your account have issues, please contact to support",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		if strings.Compare(user["password"].(string), string(body["password"].(string))) != 0 {
+			return c.JSON(fiber.Map{
+				"status":      500,
+				"message":     "your password not match",
+				"data":        nil,
+				"exited_code": 1,
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"status":  200,
+			"message": "authorized",
+			"data": fiber.Map{
+				"id":    user["id"].(string),
+				"token": user["token"].(string),
+			},
 			"exited_code": 0,
 		})
 	})
@@ -744,4 +946,14 @@ func isValidUrl(toTest string) bool {
 	}
 
 	return true
+}
+
+func getEnv(key string) string {
+	err := godotenv.Load(".env")
+  
+	if err != nil {
+	 	panic("Error loading .env file")
+	}
+  
+	return os.Getenv(key)
 }
