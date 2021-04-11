@@ -4,7 +4,7 @@ The API for Jean Shortener and implements services
 
 # TODO
 
-- Account Management Endpoints
+- Account Edit
 
 # Contact
 
