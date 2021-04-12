@@ -254,20 +254,13 @@ func RegisterShortenerRoutes(server *fiber.App, client *mongo.Client) {
 		}
 
 		var urlData = &URLShortened{}
-		if user["premium"] == true && body["is_vanity"] != nil && userID != nil {
+		if user["premium"] == true && body["is_vanity"] != false && userID != nil {
 			var checkVanityURLAvailability = make(map[string]interface{})
 
-			_, err := client.Database("JeanShortener").Collection("urls").Find(context.TODO(), bson.M{"author": bson.M{"id": userID}, "is_vanity": true})
-			if err != nil {
-				if isUnknownDocument(err.Error()) {
-					return c.JSON(fiber.Map{
-						"status":      500,
-						"message":     "non-existent user",
-						"data":        nil,
-						"exited_code": 1,
-					})	
-				}
 
+			var userVanityURLS []interface{}
+			result, err := client.Database("JeanShortener").Collection("urls").Find(context.TODO(), bson.M{"author": bson.M{"id": userID}, "is_vanity": true})
+			if err != nil {
 				return c.JSON(fiber.Map{
 					"status":      500,
 					"message":     err.Error(),
@@ -276,8 +269,17 @@ func RegisterShortenerRoutes(server *fiber.App, client *mongo.Client) {
 				})
 			}
 
-			err = client.Database("JeanShortener").Collection("urls").FindOne(context.TODO(), bson.D{{"vanity_url", body["vanity_url"].(string)}}).Decode(&checkVanityURLAvailability)
+			result.All(context.TODO(), &userVanityURLS)
+			if len(userVanityURLS) > 10 {
+				return c.JSON(fiber.Map{
+					"status":      500,
+					"message":     "you cannot have more than 10 vanity urls at the same time",
+					"data":        nil,
+					"exited_code": 1,
+				})
+			}
 
+			err = client.Database("JeanShortener").Collection("urls").FindOne(context.TODO(), bson.D{{"vanity_url", body["vanity_url"].(string)}}).Decode(&checkVanityURLAvailability)
 			if checkVanityURLAvailability["_id"] != nil {
 				return c.JSON(fiber.Map{
 					"status":      500,
