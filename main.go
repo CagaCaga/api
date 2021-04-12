@@ -175,26 +175,7 @@ func RegisterShortenerRoutes(server *fiber.App, client *mongo.Client) {
 			})
 		}
 
-		if body["url"] == nil || body["is_vanity"] == nil {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "invalid body",
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		if reflect.TypeOf(body["url"]).String() != "string" ||
-			reflect.TypeOf(body["is_vanity"]).String() != "bool" {
-			return c.JSON(fiber.Map{
-				"status":      500,
-				"message":     "invalid body",
-				"data":        nil,
-				"exited_code": 1,
-			})
-		}
-
-		if !isValidUrl(body["url"].(string)) {
+		if body["url"] == nil || body["is_vanity"] == nil || (body["url"] != nil && body["is_vanity"] != nil && reflect.TypeOf(body["url"]).String() != "string" || reflect.TypeOf(body["is_vanity"]).String() != "bool" || !isValidUrl(body["url"].(string))) {
 			return c.JSON(fiber.Map{
 				"status":      500,
 				"message":     "invalid body",
@@ -296,14 +277,6 @@ func RegisterShortenerRoutes(server *fiber.App, client *mongo.Client) {
 			}
 
 			err = client.Database("JeanShortener").Collection("urls").FindOne(context.TODO(), bson.D{{"vanity_url", body["vanity_url"].(string)}}).Decode(&checkVanityURLAvailability)
-			if err != nil {
-				return c.JSON(fiber.Map{
-					"status":      500,
-					"message":     err.Error(),
-					"data":        nil,
-					"exited_code": 1,
-				})
-			}
 
 			if checkVanityURLAvailability["_id"] != nil {
 				return c.JSON(fiber.Map{
