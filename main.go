@@ -94,7 +94,7 @@ func API(client *mongo.Client) {
 		LimitReached: func(c *fiber.Ctx) error {
 			return c.JSON(fiber.Map{
 				"status":      429,
-				"message":     "rate limited",
+				"message":     "too fast",
 				"data":        nil,
 				"exited_code": 1,
 			})
@@ -213,7 +213,7 @@ func RegisterShortenerRoutes(server *fiber.App, client *mongo.Client) {
 			if !vanityNameRegexp.MatchString(body["vanity_url"].(string)) {
 				return c.JSON(fiber.Map{
 					"status":      500,
-					"message":     "the vanity url only can be contain letters and numbers",
+					"message":     "vanity url only can content letters, numbers and underscores",
 					"data":        nil,
 					"exited_code": 1,
 				})
@@ -222,7 +222,7 @@ func RegisterShortenerRoutes(server *fiber.App, client *mongo.Client) {
 			if len(body["vanity_url"].(string)) > 100 {
 				return c.JSON(fiber.Map{
 					"status":      500,
-					"message":     "the vanity url length can't be higher than 30 characters",
+					"message":     "vanity url too long",
 					"data":        nil,
 					"exited_code": 1,
 				})
@@ -231,7 +231,7 @@ func RegisterShortenerRoutes(server *fiber.App, client *mongo.Client) {
 			if len(body["vanity_url"].(string)) < 2 {
 				return c.JSON(fiber.Map{
 					"status":      500,
-					"message":     "the vanity url length can't be lower than 2 characters",
+					"message":     "vanity url too short",
 					"data":        nil,
 					"exited_code": 1,
 				})
