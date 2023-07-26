@@ -1,3 +1,3 @@
 # Jean Shortener API
 
-https://api.to.jeanvides.com for https://to.jeanvides.com
+https://api.to.jeanvides.com for client https://to.jeanvides.com
